@@ -122,7 +122,7 @@ export default function Users(app){
                 return res.status(400).json({ message: "Invalid verification code" });
             }
 
-            // Generate serial code (20-character hex string)
+            // creating serial code (20-character hex string)
             const serialCode = crypto.randomBytes(10).toString('hex').toUpperCase();
             // Set expiration to 20 minutes from now
             const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
@@ -185,7 +185,7 @@ export default function Users(app){
             
     
             const sql = "SELECT * FROM users WHERE email = ?";
-            db.query(sql, [email], async (err, results) => {
+            db.query(sql, [email, password], async (err, results) => {
                 console.log("Database query executed");
                 if (err) {
                     return res.status(500).json({ message: "Database error" });
@@ -196,6 +196,7 @@ export default function Users(app){
                 }
     
                 const user = results[0];
+                
 
                 // Check if account is verified
                 if (user.verification_status !== 'verified') {
@@ -230,34 +231,51 @@ export default function Users(app){
     app.put('/updateUser/:user_id', async(req, res)=>{
         try {
             const { user_id } = req.params;
-            const {full_name, email, phone_number, gender, password } = req.body;
+            const { full_name, email, phone_number, gender, password } = req.body;
             let hashedPassword = null;
             if(password){
                 const salt = await bcrypt.genSalt(10);
                 hashedPassword = await bcrypt.hash(password, salt);
             }
-            const sql = `UPDATE users
-            SET 
-            full_name = COALESCE(?, full_name),
-            email = COALESCE(?, email),
-            phone_number = COALESCE(?, phone_number),
-            gender = COALESCE(?, gender),
-            password = COALESCE(?, password)
-            WHERE user_id = ?`
+
+            // Build dynamic SQL based on provided fields
+            let updates = [];
+            let params = [];
             
-            db.query(sql, [
-                full_name,
-                email,
-                phone_number,
-                gender,
-                hashedPassword,
-                user_id
-            ],(error, result)=>{
+            if (full_name !== undefined && full_name !== null) {
+                updates.push('full_name = ?');
+                params.push(full_name);
+            }
+            if (email !== undefined && email !== null) {
+                updates.push('email = ?');
+                params.push(email);
+            }
+            if (phone_number !== undefined && phone_number !== null) {
+                updates.push('phone_number = ?');
+                params.push(phone_number);
+            }
+            if (gender !== undefined && gender !== null) {
+                updates.push('gender = ?');
+                params.push(gender);
+            }
+            if (hashedPassword !== null) {
+                updates.push('password = ?');
+                params.push(hashedPassword);
+            }
+
+            if (updates.length === 0) {
+                return res.status(400).json({ message: "No fields to update" });
+            }
+
+            params.push(user_id);
+            const sql = `UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`;
+            
+            db.query(sql, params, (error, result)=>{
                 if(error) {
                     console.error("Error updating user:", error);
                     return res.status(500).json({ message: "Database error", error: error.message });
                 }
-                res.status(200).json({ message: `User updated successfully. ${result.affectedRows} row(s) affected.` });
+                res.status(200).json({ message: `User updated successfully. ${result.affectedRows} row(s) affected.`, result });
             })
         } catch (error) {
             console.error("Error updating user:", error);
@@ -353,5 +371,327 @@ export default function Users(app){
                 res.status(200).json({ message: "Password updated successfully" });
             });
         });
+    });
+
+    // ==================== ADMIN REGISTRATION & VERIFICATION ====================
+    
+    app.post('/registration_admin', async (req, res) => {
+        try {
+            const { full_name, email, phone_number, password, gender } = req.body;
+            console.log("Received admin signup data:", full_name, email, phone_number, password, gender);
+    
+            if (!password) {
+                return res.status(400).json({ message: "Password is required" });
+            }
+    
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(password, salt);
+
+            // Check if admin already exists in database
+            const checkSql = "SELECT email FROM admins WHERE email = ?";
+            db.query(checkSql, [email], (err, result) => {
+                if (err) return res.status(500).json({ message: "Database error" });
+                if (result.length > 0) return res.status(400).json({ message: "Email already registered" });
+
+                // Generate verification code (6 digits)
+                const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+                // Store in pending registrations
+                pendingRegistrations.set(email, {
+                    full_name,
+                    email,
+                    phone_number,
+                    password: hashedPassword,
+                    gender,
+                    verificationCode,
+                    createdAt: Date.now(),
+                    type: 'admin'
+                });
+
+                // Send verification email
+                let mailOptions = {
+                    from: 'mwambajason2@gmail.com',
+                    to: email,
+                    subject: 'Email Verification - LawLink Admin',
+                    text: `Your verification code is: ${verificationCode}`
+                };
+
+                transport.sendMail(mailOptions, (error) => {
+                    if (error) {
+                        console.log(error);
+                        return res.status(500).json({ message: "Error sending email" });
+                    }
+                    res.status(200).json({ message: "Verification code sent to email. Please verify to complete registration.", email });
+                });
+            });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Server error on signup" });
+        }
+    });
+
+    app.post('/verify_admin', (req, res) => {
+        const { email, verificationCode } = req.body;
+
+        if (!email || !verificationCode) {
+            return res.status(400).json({ message: "Email and verification code are required" });
+        }
+
+        try {
+            const pendingUser = pendingRegistrations.get(email);
+            
+            if (!pendingUser) {
+                return res.status(404).json({ message: "No pending registration found for this email" });
+            }
+            
+            if (pendingUser.verificationCode !== verificationCode) {
+                return res.status(400).json({ message: "Invalid verification code" });
+            }
+
+            const serialCode = crypto.randomBytes(10).toString('hex').toUpperCase();
+            const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
+
+            const insertSql = `INSERT INTO admins (full_name, email, phone_number, password, gender, verification_status, serial_code, serial_code_expires_at) VALUES (?, ?, ?, ?, ?, 'verified', ?, ?)`;
+            
+            db.query(insertSql, [pendingUser.full_name, pendingUser.email, pendingUser.phone_number, pendingUser.password, pendingUser.gender, serialCode, serialCodeExpiresAt], (insertErr, insertResult) => {
+                if (insertErr) {
+                    console.error("Database error:", insertErr);
+                    return res.status(500).json({ message: "Database error", error: insertErr.message });
+                }
+
+                const admin_id = insertResult.insertId;
+                pendingRegistrations.delete(email);
+
+                const token = jwt.sign(
+                    { adminId: admin_id, email: pendingUser.email },
+                    JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+
+                res.status(200).json({ 
+                    message: "Email verified and admin registered successfully", 
+                    token, 
+                    user: { 
+                        userId: admin_id, 
+                        email: pendingUser.email, 
+                        fullName: pendingUser.full_name, 
+                        serialCode: serialCode, 
+                        expiresAt: serialCodeExpiresAt 
+                    } 
+                });
+            });
+        } catch (err) {
+            console.log('Verification error:', err);
+            return res.status(400).json({ message: "Verification failed" });
+        }
+    });
+
+    app.post('/login_admin', async (req, res) => {
+        try {
+            const { email, password } = req.body;
+            console.log("Admin login attempt for email:", email);
+            
+            const sql = "SELECT * FROM admins WHERE email = ?";
+            db.query(sql, [email], async (err, results) => {
+                if (err) {
+                    return res.status(500).json({ message: "Database error" });
+                }
+    
+                if (results.length === 0) {
+                    return res.status(401).json({ message: "Invalid email or password" });
+                }
+    
+                const admin = results[0];
+
+                const isPasswordValid = await bcrypt.compare(password, admin.password);
+                if (!isPasswordValid) {
+                    return res.status(401).json({ message: "Invalid email or password" });
+                }
+
+                const token = jwt.sign(
+                    { adminId: admin.admin_id, email: admin.email },
+                    JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+
+                res.status(200).json({ 
+                    message: "Login successful", 
+                    token: token, 
+                    user: { 
+                        userId: admin.admin_id, 
+                        email: admin.email, 
+                        fullName: admin.full_name, 
+                        serialCode: admin.serial_code, 
+                        serialCodeExpiresAt: admin.serial_code_expires_at 
+                    } 
+                });
+            });
+    
+        } catch (error) {
+            console.log("Server error on login:", error);
+            res.status(500).json({ message: "Server error on login" });
+        }
+    });
+
+    // ==================== LAWYER REGISTRATION & VERIFICATION ====================
+
+    app.post('/registration_lawyer', async (req, res) => {
+        try {
+            const { full_name, email, phone_number, password, gender, specialization, province } = req.body;
+            console.log("Received lawyer signup data:", full_name, email, phone_number, password, gender);
+    
+            if (!password) {
+                return res.status(400).json({ message: "Password is required" });
+            }
+    
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(password, salt);
+
+            // Check if lawyer already exists in database
+            const checkSql = "SELECT email FROM lawyers WHERE email = ?";
+            db.query(checkSql, [email], (err, result) => {
+                if (err) return res.status(500).json({ message: "Database error" });
+                if (result.length > 0) return res.status(400).json({ message: "Email already registered" });
+
+                // Generate verification code (6 digits)
+                const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+                // Store in pending registrations
+                pendingRegistrations.set(email, {
+                    full_name,
+                    email,
+                    phone_number,
+                    password: hashedPassword,
+                    gender,
+                    specialization,
+                    province,
+                    verificationCode,
+                    createdAt: Date.now(),
+                    type: 'lawyer'
+                });
+
+                // Send verification email
+                let mailOptions = {
+                    from: 'mwambajason2@gmail.com',
+                    to: email,
+                    subject: 'Email Verification - LawLink Lawyer',
+                    text: `Your verification code is: ${verificationCode}`
+                };
+
+                transport.sendMail(mailOptions, (error) => {
+                    if (error) {
+                        console.log(error);
+                        return res.status(500).json({ message: "Error sending email" });
+                    }
+                    res.status(200).json({ message: "Verification code sent to email. Please verify to complete registration.", email });
+                });
+            });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: "Server error on signup" });
+        }
+    });
+
+    app.post('/verify_lawyer', (req, res) => {
+        const { email, verificationCode } = req.body;
+
+        if (!email || !verificationCode) {
+            return res.status(400).json({ message: "Email and verification code are required" });
+        }
+
+        try {
+            const pendingUser = pendingRegistrations.get(email);
+            
+            if (!pendingUser) {
+                return res.status(404).json({ message: "No pending registration found for this email" });
+            }
+            
+            if (pendingUser.verificationCode !== verificationCode) {
+                return res.status(400).json({ message: "Invalid verification code" });
+            }
+
+            const serialCode = crypto.randomBytes(10).toString('hex').toUpperCase();
+            const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
+
+            const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, gender, specialization, province, verification_status, serial_code, serial_code_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'verified', ?, ?)`;
+            
+            db.query(insertSql, [pendingUser.full_name, pendingUser.email, pendingUser.phone_number, pendingUser.password, pendingUser.gender, pendingUser.specialization, pendingUser.province, serialCode, serialCodeExpiresAt], (insertErr, insertResult) => {
+                if (insertErr) {
+                    console.error("Database error:", insertErr);
+                    return res.status(500).json({ message: "Database error", error: insertErr.message });
+                }
+
+                const lawyer_id = insertResult.insertId;
+                pendingRegistrations.delete(email);
+
+                const token = jwt.sign(
+                    { lawyerId: lawyer_id, email: pendingUser.email },
+                    JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+
+                res.status(200).json({ 
+                    message: "Email verified and lawyer registered successfully", 
+                    token, 
+                    user: { 
+                        userId: lawyer_id, 
+                        email: pendingUser.email, 
+                        fullName: pendingUser.full_name, 
+                        serialCode: serialCode, 
+                        expiresAt: serialCodeExpiresAt 
+                    } 
+                });
+            });
+        } catch (err) {
+            console.log('Verification error:', err);
+            return res.status(400).json({ message: "Verification failed" });
+        }
+    });
+
+    app.post('/login_lawyer', async (req, res) => {
+        try {
+            const { email, password } = req.body;
+            console.log("Lawyer login attempt for email:", email);
+            
+            const sql = "SELECT * FROM lawyers WHERE email = ?";
+            db.query(sql, [email], async (err, results) => {
+                if (err) {
+                    return res.status(500).json({ message: "Database error" });
+                }
+    
+                if (results.length === 0) {
+                    return res.status(401).json({ message: "Invalid email or password" });
+                }
+    
+                const lawyer = results[0];
+
+                const isPasswordValid = await bcrypt.compare(password, lawyer.password);
+                if (!isPasswordValid) {
+                    return res.status(401).json({ message: "Invalid email or password" });
+                }
+
+                const token = jwt.sign(
+                    { lawyerId: lawyer.lawyer_id, email: lawyer.email },
+                    JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+
+                res.status(200).json({ 
+                    message: "Login successful", 
+                    token: token, 
+                    user: { 
+                        userId: lawyer.lawyer_id, 
+                        email: lawyer.email, 
+                        fullName: lawyer.full_name, 
+                        serialCode: lawyer.serial_code, 
+                        serialCodeExpiresAt: lawyer.serial_code_expires_at 
+                    } 
+                });
+            });
+    
+        } catch (error) {
+            console.log("Server error on login:", error);
+            res.status(500).json({ message: "Server error on login" });
+        }
     });
 }

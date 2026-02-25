@@ -12,7 +12,7 @@ import Users from '../routes/users.js';
 import Messages from '../routes/messages.js';
 
 
-const port = 3001;
+const port = 3002;
 
 // Initialize routes
 Admins(app);

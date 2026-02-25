@@ -14,7 +14,7 @@ const transport = nodemailer.createTransport({
   }
 });
 
-export default function Lawyers(app){
+export default function Lawyerss(app){
     
     // New Lawyer Registration Endpoint
     app.post('/registration_Lawyer', async (req, res) => {
@@ -138,118 +138,7 @@ export default function Lawyers(app){
             return res.status(400).json({ message: "Verification failed" });
         }
     });
-    
     //lawstarts 
-app.post("/Registration_lawyer", async (req, res) => {
-  try {
-    const {
-      full_name,
-      email,
-      specialization,
-      attorney_status,
-      bio,
-      phone_number,
-      password
-    } = req.body;
-
-    if (!password) {
-      return res.status(400).json({ message: "Password is required" });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Check if lawyer already exists
-    const checkSql = "SELECT email FROM lawyers WHERE email = ?";
-    db.query(checkSql, [email], (err, result) => {
-        if (err) return res.status(500).json({ message: "Database error" });
-        if (result.length > 0) return res.status(400).json({ message: "Email already registered" });
-
-        // Generate a simple 6-digit verification code
-        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-        console.log(`Verification code for new lawyer ${email} is: ${verificationCode}`);
-
-        let mailOptions = {
-            from: 'mwambajason2@gmail.com',
-            to: email,
-            subject: 'Verify email for LawLink Lawyer registration',
-            text: `Your verification code is: ${verificationCode}`
-        };
-
-        transport.sendMail(mailOptions, function(error, info){
-            if (error) {
-                console.log(error);
-            } else {
-                console.log('Email sent: ' + info.response);
-            }
-        });
-
-        // Create a temporary token
-        const tempToken = jwt.sign({
-            full_name, email, phone_number, password: hashedPassword, specialization, attorney_status, bio, verificationCode
-        }, JWT_SECRET, { expiresIn: '1h' });
-
-        res.status(200).json({
-            message: "Verification code sent. Please verify to complete registration.",
-            tempToken
-        });
-    });
-
-  } catch (error) {
-    console.error("Signup error:", error);
-    res.status(500).json({ message: "Server error on signup" });
-  }
-});
-
-app.post('/verify_lawyer', (req, res) => {
-    const { tempToken, verificationCode } = req.body;
-
-    if (!tempToken || !verificationCode) {
-        return res.status(400).json({ message: "Token and verification code are required" });
-    }
-
-    try {
-        const decoded = jwt.verify(tempToken, JWT_SECRET);
-
-        if (decoded.verificationCode !== verificationCode) {
-            return res.status(400).json({ message: "Invalid verification code" });
-        }
-
-        // Insert lawyer into database
-        // Note: verification_status defaults to 'pending' in schema, which is appropriate for lawyers needing admin approval
-        const sql = `
-            INSERT INTO lawyers 
-            (full_name, email, phone_number, password, specialization, attorney_status, bio, verification_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-        `;
-        
-        db.query(sql, [
-            decoded.full_name, 
-            decoded.email, 
-            decoded.phone_number, 
-            decoded.password, 
-            decoded.specialization, 
-            decoded.attorney_status, 
-            decoded.bio
-        ], (err, result) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err.message });
-
-            // Generate login token
-            const token = jwt.sign(
-                { lawyerId: result.insertId, email: decoded.email },
-                JWT_SECRET,
-                { expiresIn: '24h' }
-            );
-
-            res.status(201).json({ 
-                message: "Lawyer verified and registered successfully. Account pending admin approval.", 
-                token, 
-                lawyer: { lawyerId: result.insertId, email: decoded.email, fullName: decoded.full_name } 
-            });
-        });
-    } catch (error) {
-        return res.status(400).json({ message: "Invalid or expired token" });
-    }
-});
 
 app.get('/getlawyers', (req, res)=>{
     try {
@@ -305,10 +194,7 @@ app.post('/login_lawyer', async (req, res) => { // Changed to POST and a more de
 // error on hash password
 app.put("/updatelawyers/:lawyer_id", async (req, res) => {
   try {
-    // ✅ correct param
     const { lawyer_id } = req.params;
-
-    // ✅ use body
     const {
       full_name,
       email,
@@ -319,49 +205,60 @@ app.put("/updatelawyers/:lawyer_id", async (req, res) => {
       password
     } = req.body;
 
-    // ✅ must be LET
     let hashedPassword = null;
-
     if (password) {
       hashedPassword = await bcrypt.hash(password, 10);
     }
 
-    const sql = `
-      UPDATE lawyers
-      SET
-        full_name = COALESCE(?, full_name),
-        email = COALESCE(?, email),
-        phone_number = COALESCE(?, phone_number),
-        specialization = COALESCE(?, specialization),
-        attorney_status = COALESCE(?, attorney_status),
-        bio = COALESCE(?, bio),
-        password = COALESCE(?, password)
-      WHERE lawyer_id = ?
-    `;
+    // Build dynamic SQL based on provided fields
+    let updates = [];
+    let params = [];
+    
+    if (full_name !== undefined && full_name !== null) {
+      updates.push('full_name = ?');
+      params.push(full_name);
+    }
+    if (email !== undefined && email !== null) {
+      updates.push('email = ?');
+      params.push(email);
+    }
+    if (phone_number !== undefined && phone_number !== null) {
+      updates.push('phone_number = ?');
+      params.push(phone_number);
+    }
+    if (specialization !== undefined && specialization !== null) {
+      updates.push('specialization = ?');
+      params.push(specialization);
+    }
+    if (attorney_status !== undefined && attorney_status !== null) {
+      updates.push('attorney_status = ?');
+      params.push(attorney_status);
+    }
+    if (bio !== undefined && bio !== null) {
+      updates.push('bio = ?');
+      params.push(bio);
+    }
+    if (hashedPassword !== null) {
+      updates.push('password = ?');
+      params.push(hashedPassword);
+    }
 
-    db.query(
-      sql,
-      [
-        full_name || null,
-        email || null,
-        phone_number || null,
-        specialization || null,
-        attorney_status || null,
-        bio || null,
-        hashedPassword,
-        lawyer_id
-      ],
-      (error, result) => {
-        if (error) {
-          console.error(error);
-          return res.status(500).json({ message: "Database error" });
-        }
+    if (updates.length === 0) {
+      return res.status(400).json({ message: "No fields to update" });
+    }
 
-        res.status(200).json({
-          message: `Lawyer updated successfully ${result.affectedRows} row(s) affected`
-        });
+    params.push(lawyer_id);
+    const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
+
+    db.query(sql, params, (error, result) => {
+      if (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Database error" });
       }
-    );
+      res.status(200).json({
+        message: `Lawyer updated successfully ${result.affectedRows} row(s) affected`
+      });
+    });
 
   } catch (error) {
     console.error("Error updating lawyer:", error);

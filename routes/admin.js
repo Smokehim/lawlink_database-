@@ -149,21 +149,37 @@ app.put('/admins/:admin_id', async (req, res) => {
     const { admin_id } = req.params;
     const { full_name, email, password } = req.body;
 
-    let hashedPassword;
+    let hashedPassword = null;
     if (password) {
         const salt = await bcrypt.genSalt(10);
         hashedPassword = await bcrypt.hash(password, salt);
     }
 
-    const sql = `
-        UPDATE admins
-        SET full_name = COALESCE(?, full_name),
-            email = COALESCE(?, email),
-            password = COALESCE(?, password)
-        WHERE admin_id = ?
-    `;
+    // Build dynamic SQL based on provided fields
+    let updates = [];
+    let params = [];
+    
+    if (full_name !== undefined && full_name !== null) {
+        updates.push('full_name = ?');
+        params.push(full_name);
+    }
+    if (email !== undefined && email !== null) {
+        updates.push('email = ?');
+        params.push(email);
+    }
+    if (hashedPassword !== null) {
+        updates.push('password = ?');
+        params.push(hashedPassword);
+    }
 
-    db.query(sql, [full_name, email, hashedPassword, admin_id], (err, result) => {
+    if (updates.length === 0) {
+        return res.status(400).json({ message: "No fields to update" });
+    }
+
+    params.push(admin_id);
+    const sql = `UPDATE admins SET ${updates.join(', ')} WHERE admin_id = ?`;
+
+    db.query(sql, params, (err, result) => {
         if (err) return res.status(500).json({ message: "Database error", error: err });
         res.json({ message: `Admin updated successfully ${result.affectedRows} row(s) affected` });
     });
@@ -197,27 +213,59 @@ app.delete('/admins/:admin_id', (req, res) => {
             specialization, attorney_status, bio, bar_number, verification_status
         } = req.body;
 
-        const sql = `
-            UPDATE lawyers
-            SET
-                full_name = COALESCE(?, full_name),
-                email = COALESCE(?, email),
-                phone_number = COALESCE(?, phone_number),
-                province = COALESCE(?, province),
-                district = COALESCE(?, district),
-                specialization = COALESCE(?, specialization),
-                attorney_status = COALESCE(?, attorney_status),
-                bio = COALESCE(?, bio),
-                bar_number = COALESCE(?, bar_number),
-                verification_status = COALESCE(?, verification_status)
-            WHERE lawyer_id = ?
-        `;
+        // Build dynamic SQL based on provided fields
+        let updates = [];
+        let params = [];
+        
+        if (full_name !== undefined && full_name !== null) {
+            updates.push('full_name = ?');
+            params.push(full_name);
+        }
+        if (email !== undefined && email !== null) {
+            updates.push('email = ?');
+            params.push(email);
+        }
+        if (phone_number !== undefined && phone_number !== null) {
+            updates.push('phone_number = ?');
+            params.push(phone_number);
+        }
+        if (province !== undefined && province !== null) {
+            updates.push('province = ?');
+            params.push(province);
+        }
+        if (district !== undefined && district !== null) {
+            updates.push('district = ?');
+            params.push(district);
+        }
+        if (specialization !== undefined && specialization !== null) {
+            updates.push('specialization = ?');
+            params.push(specialization);
+        }
+        if (attorney_status !== undefined && attorney_status !== null) {
+            updates.push('attorney_status = ?');
+            params.push(attorney_status);
+        }
+        if (bio !== undefined && bio !== null) {
+            updates.push('bio = ?');
+            params.push(bio);
+        }
+        if (bar_number !== undefined && bar_number !== null) {
+            updates.push('bar_number = ?');
+            params.push(bar_number);
+        }
+        if (verification_status !== undefined && verification_status !== null) {
+            updates.push('verification_status = ?');
+            params.push(verification_status);
+        }
 
-        db.query(sql, [
-            full_name, email, phone_number, province, district,
-            specialization, attorney_status, bio, bar_number,
-            verification_status, lawyer_id
-        ], (err, result) => {
+        if (updates.length === 0) {
+            return res.status(400).json({ message: "No fields to update" });
+        }
+
+        params.push(lawyer_id);
+        const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
+
+        db.query(sql, params, (err, result) => {
             if (err) return res.status(500).json({ message: "Database error", error: err });
             if (result.affectedRows === 0) {
                 return res.status(404).json({ message: "Lawyer not found" });

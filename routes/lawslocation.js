@@ -59,15 +59,27 @@ export default function Lawslocation(app){
         const { location_id } = req.params;
         const { district_id, physical_address } = req.body;
     
-        const sql = `
-            UPDATE lawyer_locations
-            SET
-                district_id = COALESCE(?, district_id),
-                physical_address = COALESCE(?, physical_address)
-            WHERE location_id = ?
-        `;
+        // Build dynamic SQL based on provided fields
+        let updates = [];
+        let params = [];
+        
+        if (district_id !== undefined && district_id !== null) {
+            updates.push('district_id = ?');
+            params.push(district_id);
+        }
+        if (physical_address !== undefined && physical_address !== null) {
+            updates.push('physical_address = ?');
+            params.push(physical_address);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ message: "No fields to update" });
+        }
+
+        params.push(location_id);
+        const sql = `UPDATE lawyer_locations SET ${updates.join(', ')} WHERE location_id = ?`;
     
-        db.query(sql, [district_id, physical_address, location_id], (err, result) => {
+        db.query(sql, params, (err, result) => {
             if (err) {
                 return res.status(500).json({ error: err.message });
             }
