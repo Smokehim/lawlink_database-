@@ -14,7 +14,7 @@ import Messages from '../routes/messages.js';
 
 const port = 3002;
 
-// Initialize routes
+
 Admins(app);
 District(app);
 Lawyers(app);

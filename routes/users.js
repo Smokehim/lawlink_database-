@@ -34,7 +34,7 @@ export default function Users(app){
     app.post('/registration_User', async (req, res) => {
         try {
             const { full_name, email, phone_number, password, gender } = req.body;
-            console.log("Received signup data:", full_name, email, phone_number, password, gender);
+            console.log("Received signup data:", req.body);
     
             if (!password) {
                 return res.status(400).json({ message: "Password is required" });
@@ -101,7 +101,7 @@ export default function Users(app){
             res.status(500).json({ message: "Server error on signup" });
         }
     });
-
+    
     app.post('/verify_user', (req, res) => {
         const { email, verificationCode } = req.body;
 
@@ -227,97 +227,26 @@ export default function Users(app){
             res.status(500).json({ message: "Server error on login" });
         }
     });
-    // error on hash password
-    app.put('/updateUser/:user_id', async(req, res)=>{
+    //checing post 
+    app.post('/userspost', async (req, res)=>{
+        const { full_name, email, phone_number, password, gender } = req.body;
+
+        if (!password) {
+            return res.status(400).json({ message: "Password is required." });
+        }
+
         try {
-            const { user_id } = req.params;
-            const { full_name, email, phone_number, gender, password } = req.body;
-            let hashedPassword = null;
-            if(password){
-                const salt = await bcrypt.genSalt(10);
-                hashedPassword = await bcrypt.hash(password, salt);
-            }
-
-            // Build dynamic SQL based on provided fields
-            let updates = [];
-            let params = [];
-            
-            if (full_name !== undefined && full_name !== null) {
-                updates.push('full_name = ?');
-                params.push(full_name);
-            }
-            if (email !== undefined && email !== null) {
-                updates.push('email = ?');
-                params.push(email);
-            }
-            if (phone_number !== undefined && phone_number !== null) {
-                updates.push('phone_number = ?');
-                params.push(phone_number);
-            }
-            if (gender !== undefined && gender !== null) {
-                updates.push('gender = ?');
-                params.push(gender);
-            }
-            if (hashedPassword !== null) {
-                updates.push('password = ?');
-                params.push(hashedPassword);
-            }
-
-            if (updates.length === 0) {
-                return res.status(400).json({ message: "No fields to update" });
-            }
-
-            params.push(user_id);
-            const sql = `UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`;
-            
-            db.query(sql, params, (error, result)=>{
-                if(error) {
-                    console.error("Error updating user:", error);
-                    return res.status(500).json({ message: "Database error", error: error.message });
-                }
-                res.status(200).json({ message: `User updated successfully. ${result.affectedRows} row(s) affected.`, result });
-            })
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(password, salt);
+            const insertSql = `INSERT INTO users (full_name, email, phone_number, password, gender) VALUES (?, ?, ?, ?, ?)`;
+            db.query(insertSql, [full_name, email, phone_number, hashedPassword, gender], (error, results)=>{
+                if(error) return res.status(500).json({message:"db error",error });
+                res.status(201).json({message: "User inserted successfully", results});
+            });
         } catch (error) {
-            console.error("Error updating user:", error);
-            res.status(500).json({ message: "Server error on updating user" });
+            res.status(500).json({ message: "Server error during user creation." });
         }
     })
-    app.delete('/deleteUser', (req, res) => {
-        try {
-            const { user_id, email, password }= req.body;
-        
-        const selectSql = `SELECT * FROM users WHERE user_id = ? AND email = ?`;
-        db.query(selectSql, [user_id, email], async(error, result) => {
-            if (error) {
-                return res.status(500).json({ message: "Database error" });
-            }
-    
-            if (result.length === 0) {
-                return res.status(404).json({ message: "User not found" });
-            }
-    
-            const user = result[0];
-            const isMatch = await bcrypt.compare(password, user.password);
-    
-            if (!isMatch) {
-                return res.status(401).json({ message: "Incorrect password" });
-           }
-           const sql = `DELETE FROM users WHERE user_id = ?`;
-    
-           db.query(sql, [user_id], (error, results) => {
-               if (error) {
-                   return res.status(500).json({ message: "Database error" });
-               }
-               res.status(200).json({ message: "User deleted successfully", results });
-           });
-        });
-            
-        } catch (error) {
-            console.log("Error deleting user:", error);
-            res.status(500).json({ message: "Server error on deleting user" });
-        }
-    });
-
     app.post('/forgot_password_user', (req, res) => {
         const { email } = req.body;
         if (!email) return res.status(400).json({ message: "Email is required" });
@@ -359,7 +288,7 @@ export default function Users(app){
 
         const sql = "SELECT * FROM users WHERE email = ? AND verification_code = ?";
         db.query(sql, [email, verificationCode], async (err, result) => {
-            if (err) return res.status(500).json({ message: "Database error" });
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
             if (result.length === 0) return res.status(400).json({ message: "Invalid code or email" });
 
             const salt = await bcrypt.genSalt(10);
@@ -367,331 +296,117 @@ export default function Users(app){
 
             const updateSql = "UPDATE users SET password = ?, verification_code = NULL WHERE email = ?";
             db.query(updateSql, [hashedPassword, email], (updateErr) => {
-                if (updateErr) return res.status(500).json({ message: "Database error" });
+                if (updateErr) return res.status(500).json({ message: "Database error", error: updateErr.message });
                 res.status(200).json({ message: "Password updated successfully" });
             });
         });
     });
 
-    // ==================== ADMIN REGISTRATION & VERIFICATION ====================
-    
-    app.post('/registration_admin', async (req, res) => {
+    // Update user profile
+    app.put('/users/:user_id', async (req, res) => {
         try {
-            const { full_name, email, phone_number, password, gender } = req.body;
-            console.log("Received admin signup data:", full_name, email, phone_number, password, gender);
-    
-            if (!password) {
-                return res.status(400).json({ message: "Password is required" });
+            const { user_id } = req.params;
+            const { full_name, phone_number, gender } = req.body;
+
+            let updates = [];
+            let params = [];
+
+            if (full_name !== undefined) { updates.push('full_name = ?'); params.push(full_name); }
+            if (phone_number !== undefined) { updates.push('phone_number = ?'); params.push(phone_number); }
+            if (gender !== undefined) { updates.push('gender = ?'); params.push(gender); }
+
+            if (updates.length === 0) {
+                return res.status(400).json({ message: "No fields to update" });
             }
-    
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
 
-            // Check if admin already exists in database
-            const checkSql = "SELECT email FROM admins WHERE email = ?";
-            db.query(checkSql, [email], (err, result) => {
-                if (err) return res.status(500).json({ message: "Database error" });
-                if (result.length > 0) return res.status(400).json({ message: "Email already registered" });
+            params.push(user_id);
+            const sql = `UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`;
 
-                // Generate verification code (6 digits)
-                const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+            db.query(sql, params, (error, result) => {
+                if (error) return res.status(500).json({ message: "Database error", error: error.message });
+                if (result.affectedRows === 0) return res.status(404).json({ message: "User not found" });
+                res.status(200).json({ message: `User profile updated successfully.` });
+            });
+        } catch (error) {
+            console.error("Server error on updating user profile:", error);
+            res.status(500).json({ message: "Server error on updating user profile" });
+        }
+    });
 
-                // Store in pending registrations
-                pendingRegistrations.set(email, {
-                    full_name,
-                    email,
-                    phone_number,
-                    password: hashedPassword,
-                    gender,
-                    verificationCode,
-                    createdAt: Date.now(),
-                    type: 'admin'
-                });
+    // Change a user's password
+    app.put('/users/:user_id/password', async (req, res) => {
+        try {
+            const { user_id } = req.params;
+            const { current_password, new_password } = req.body;
 
-                // Send verification email
-                let mailOptions = {
-                    from: 'mwambajason2@gmail.com',
-                    to: email,
-                    subject: 'Email Verification - LawLink Admin',
-                    text: `Your verification code is: ${verificationCode}`
-                };
+            if (!current_password || !new_password) {
+                return res.status(400).json({ message: "Current and new passwords are required." });
+            }
 
-                transport.sendMail(mailOptions, (error) => {
-                    if (error) {
-                        console.log(error);
-                        return res.status(500).json({ message: "Error sending email" });
-                    }
-                    res.status(200).json({ message: "Verification code sent to email. Please verify to complete registration.", email });
+            const selectSql = `SELECT password FROM users WHERE user_id = ?`;
+            db.query(selectSql, [user_id], async (error, result) => {
+                if (error) return res.status(500).json({ message: "Database error", error: error.message });
+                if (result.length === 0) return res.status(404).json({ message: "User not found" });
+
+                const user = result[0];
+                const isMatch = await bcrypt.compare(current_password, user.password);
+
+                if (!isMatch) {
+                    return res.status(401).json({ message: "Incorrect current password" });
+                }
+
+                const salt = await bcrypt.genSalt(10);
+                const hashedNewPassword = await bcrypt.hash(new_password, salt);
+
+                const updateSql = `UPDATE users SET password = ? WHERE user_id = ?`;
+                db.query(updateSql, [hashedNewPassword, user_id], (updateError) => {
+                    if (updateError) return res.status(500).json({ message: "Database error during password update", error: updateError.message });
+                    res.status(200).json({ message: "Password updated successfully" });
                 });
             });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: "Server error on signup" });
+            console.error("Server error on changing password:", error);
+            res.status(500).json({ message: "Server error on changing password" });
         }
     });
 
-    app.post('/verify_admin', (req, res) => {
-        const { email, verificationCode } = req.body;
+    app.delete('/delete_user', async (req, res) => {
+        const { email, password, user_id } = req.body;
 
-        if (!email || !verificationCode) {
-            return res.status(400).json({ message: "Email and verification code are required" });
+        if (!email || !password || !user_id) {
+             return res.status(400).json({ message: "Email, password and user_id are required" });
         }
 
         try {
-            const pendingUser = pendingRegistrations.get(email);
-            
-            if (!pendingUser) {
-                return res.status(404).json({ message: "No pending registration found for this email" });
-            }
-            
-            if (pendingUser.verificationCode !== verificationCode) {
-                return res.status(400).json({ message: "Invalid verification code" });
-            }
+            console.log(`Attempting to delete user_ID: ${user_id}, Email: ${email} ${user_id}`);
 
-            const serialCode = crypto.randomBytes(10).toString('hex').toUpperCase();
-            const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
-
-            const insertSql = `INSERT INTO admins (full_name, email, phone_number, password, gender, verification_status, serial_code, serial_code_expires_at) VALUES (?, ?, ?, ?, ?, 'verified', ?, ?)`;
-            
-            db.query(insertSql, [pendingUser.full_name, pendingUser.email, pendingUser.phone_number, pendingUser.password, pendingUser.gender, serialCode, serialCodeExpiresAt], (insertErr, insertResult) => {
-                if (insertErr) {
-                    console.error("Database error:", insertErr);
-                    return res.status(500).json({ message: "Database error", error: insertErr.message });
+            const selectSql = `SELECT * FROM users WHERE user_id = ? AND email = ?`;
+            db.query(selectSql, [user_id, email], async (error, result) => {
+                if (error) {
+                    return res.status(500).json({ message: "Database error", error: error.message });
+                }
+                if (result.length === 0) {
+                    return res.status(404).json({ message: "User not found or email does not match" });
                 }
 
-                const admin_id = insertResult.insertId;
-                pendingRegistrations.delete(email);
+                const user = result[0];
+                const isMatch = await bcrypt.compare(password, user.password);
 
-                const token = jwt.sign(
-                    { adminId: admin_id, email: pendingUser.email },
-                    JWT_SECRET,
-                    { expiresIn: '24h' }
-                );
-
-                res.status(200).json({ 
-                    message: "Email verified and admin registered successfully", 
-                    token, 
-                    user: { 
-                        userId: admin_id, 
-                        email: pendingUser.email, 
-                        fullName: pendingUser.full_name, 
-                        serialCode: serialCode, 
-                        expiresAt: serialCodeExpiresAt 
-                    } 
-                });
-            });
-        } catch (err) {
-            console.log('Verification error:', err);
-            return res.status(400).json({ message: "Verification failed" });
-        }
-    });
-
-    app.post('/login_admin', async (req, res) => {
-        try {
-            const { email, password } = req.body;
-            console.log("Admin login attempt for email:", email);
-            
-            const sql = "SELECT * FROM admins WHERE email = ?";
-            db.query(sql, [email], async (err, results) => {
-                if (err) {
-                    return res.status(500).json({ message: "Database error" });
-                }
-    
-                if (results.length === 0) {
-                    return res.status(401).json({ message: "Invalid email or password" });
-                }
-    
-                const admin = results[0];
-
-                const isPasswordValid = await bcrypt.compare(password, admin.password);
-                if (!isPasswordValid) {
-                    return res.status(401).json({ message: "Invalid email or password" });
+                if (!isMatch) {
+                    return res.status(401).json({ message: "Incorrect password" });
                 }
 
-                const token = jwt.sign(
-                    { adminId: admin.admin_id, email: admin.email },
-                    JWT_SECRET,
-                    { expiresIn: '24h' }
-                );
-
-                res.status(200).json({ 
-                    message: "Login successful", 
-                    token: token, 
-                    user: { 
-                        userId: admin.admin_id, 
-                        email: admin.email, 
-                        fullName: admin.full_name, 
-                        serialCode: admin.serial_code, 
-                        serialCodeExpiresAt: admin.serial_code_expires_at 
-                    } 
-                });
-            });
-    
-        } catch (error) {
-            console.log("Server error on login:", error);
-            res.status(500).json({ message: "Server error on login" });
-        }
-    });
-
-    // ==================== LAWYER REGISTRATION & VERIFICATION ====================
-
-    app.post('/registration_lawyer', async (req, res) => {
-        try {
-            const { full_name, email, phone_number, password, gender, specialization, province } = req.body;
-            console.log("Received lawyer signup data:", full_name, email, phone_number, password, gender);
-    
-            if (!password) {
-                return res.status(400).json({ message: "Password is required" });
-            }
-    
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
-
-            // Check if lawyer already exists in database
-            const checkSql = "SELECT email FROM lawyers WHERE email = ?";
-            db.query(checkSql, [email], (err, result) => {
-                if (err) return res.status(500).json({ message: "Database error" });
-                if (result.length > 0) return res.status(400).json({ message: "Email already registered" });
-
-                // Generate verification code (6 digits)
-                const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-                // Store in pending registrations
-                pendingRegistrations.set(email, {
-                    full_name,
-                    email,
-                    phone_number,
-                    password: hashedPassword,
-                    gender,
-                    specialization,
-                    province,
-                    verificationCode,
-                    createdAt: Date.now(),
-                    type: 'lawyer'
-                });
-
-                // Send verification email
-                let mailOptions = {
-                    from: 'mwambajason2@gmail.com',
-                    to: email,
-                    subject: 'Email Verification - LawLink Lawyer',
-                    text: `Your verification code is: ${verificationCode}`
-                };
-
-                transport.sendMail(mailOptions, (error) => {
-                    if (error) {
-                        console.log(error);
-                        return res.status(500).json({ message: "Error sending email" });
-                    }
-                    res.status(200).json({ message: "Verification code sent to email. Please verify to complete registration.", email });
+                const deleteSql = `DELETE FROM users WHERE user_id = ?`;
+                db.query(deleteSql, [user_id], (deleteError) => {
+                    if (deleteError) return res.status(500).json({ message: "Database error during deletion", error: deleteError.message });
+                    res.status(200).json({ message: "User account deleted successfully" });
                 });
             });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: "Server error on signup" });
+            console.error("Server error on deleting user:", error);
+            res.status(500).json({ message: "Server error on deleting user" });
         }
     });
 
-    app.post('/verify_lawyer', (req, res) => {
-        const { email, verificationCode } = req.body;
-
-        if (!email || !verificationCode) {
-            return res.status(400).json({ message: "Email and verification code are required" });
-        }
-
-        try {
-            const pendingUser = pendingRegistrations.get(email);
-            
-            if (!pendingUser) {
-                return res.status(404).json({ message: "No pending registration found for this email" });
-            }
-            
-            if (pendingUser.verificationCode !== verificationCode) {
-                return res.status(400).json({ message: "Invalid verification code" });
-            }
-
-            const serialCode = crypto.randomBytes(10).toString('hex').toUpperCase();
-            const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
-
-            const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, gender, specialization, province, verification_status, serial_code, serial_code_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'verified', ?, ?)`;
-            
-            db.query(insertSql, [pendingUser.full_name, pendingUser.email, pendingUser.phone_number, pendingUser.password, pendingUser.gender, pendingUser.specialization, pendingUser.province, serialCode, serialCodeExpiresAt], (insertErr, insertResult) => {
-                if (insertErr) {
-                    console.error("Database error:", insertErr);
-                    return res.status(500).json({ message: "Database error", error: insertErr.message });
-                }
-
-                const lawyer_id = insertResult.insertId;
-                pendingRegistrations.delete(email);
-
-                const token = jwt.sign(
-                    { lawyerId: lawyer_id, email: pendingUser.email },
-                    JWT_SECRET,
-                    { expiresIn: '24h' }
-                );
-
-                res.status(200).json({ 
-                    message: "Email verified and lawyer registered successfully", 
-                    token, 
-                    user: { 
-                        userId: lawyer_id, 
-                        email: pendingUser.email, 
-                        fullName: pendingUser.full_name, 
-                        serialCode: serialCode, 
-                        expiresAt: serialCodeExpiresAt 
-                    } 
-                });
-            });
-        } catch (err) {
-            console.log('Verification error:', err);
-            return res.status(400).json({ message: "Verification failed" });
-        }
-    });
-
-    app.post('/login_lawyer', async (req, res) => {
-        try {
-            const { email, password } = req.body;
-            console.log("Lawyer login attempt for email:", email);
-            
-            const sql = "SELECT * FROM lawyers WHERE email = ?";
-            db.query(sql, [email], async (err, results) => {
-                if (err) {
-                    return res.status(500).json({ message: "Database error" });
-                }
-    
-                if (results.length === 0) {
-                    return res.status(401).json({ message: "Invalid email or password" });
-                }
-    
-                const lawyer = results[0];
-
-                const isPasswordValid = await bcrypt.compare(password, lawyer.password);
-                if (!isPasswordValid) {
-                    return res.status(401).json({ message: "Invalid email or password" });
-                }
-
-                const token = jwt.sign(
-                    { lawyerId: lawyer.lawyer_id, email: lawyer.email },
-                    JWT_SECRET,
-                    { expiresIn: '24h' }
-                );
-
-                res.status(200).json({ 
-                    message: "Login successful", 
-                    token: token, 
-                    user: { 
-                        userId: lawyer.lawyer_id, 
-                        email: lawyer.email, 
-                        fullName: lawyer.full_name, 
-                        serialCode: lawyer.serial_code, 
-                        serialCodeExpiresAt: lawyer.serial_code_expires_at 
-                    } 
-                });
-            });
-    
-        } catch (error) {
-            console.log("Server error on login:", error);
-            res.status(500).json({ message: "Server error on login" });
-        }
-    });
+ 
 }

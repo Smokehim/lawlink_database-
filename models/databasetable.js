@@ -138,23 +138,52 @@ db.connect((err) => {
         
         db.query(locSql, (err) => {
              if (err && err.code !== 'ER_NO_SUCH_TABLE') console.error("Error creating lawyer_locations table:", err.message);
-             else if (!err) console.log("Lawyer_locations Table Created");
+             else if (!err) {
+                console.log("Lawyer_locations Table Created");
+                ConversationsTable();
+             }
         });
-        createMessagesTable();
     }
+    function ConversationsTable() {
+    const Sql = `CREATE TABLE IF NOT EXISTS conversations (
+        conversation_id INT AUTO_INCREMENT PRIMARY KEY,
+        lawyer_id INT NOT NULL,
+        participant_id INT NOT NULL,
+        participant_role ENUM('client', 'admin') NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        
+        UNIQUE KEY unique_conversation (participant_id, participant_role, lawyer_id),
+        INDEX idx_lawyer (lawyer_id),
+        INDEX idx_participant (participant_id, participant_role)
+    )`;
 
+    db.query(Sql, (err, result) => {
+        if (err) console.error("Error creating conversations table:", err.message);
+        else {
+            console.log("Conversations Table Created");
+            createMessagesTable(); // 👈 create messages AFTER conversations
+        }
+    });
+   }
     function createMessagesTable() {
         const messagesSql = `CREATE TABLE IF NOT EXISTS messages (
-            message_id INT AUTO_INCREMENT PRIMARY KEY,
-            sender_id INT NOT NULL,
-            receiver_id INT NOT NULL,
-            sender_type ENUM('user', 'lawyer') NOT NULL,
-            receiver_type ENUM('user', 'lawyer') NOT NULL,
-            message_text TEXT NOT NULL,
-            is_read BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )`;
+        message_id INT AUTO_INCREMENT PRIMARY KEY,
+
+        conversation_id INT NOT NULL,
+
+        sender_id INT NOT NULL,
+        sender_role ENUM('client', 'lawyer', 'admin') NOT NULL,
+
+        message_text TEXT NOT NULL,
+        is_read BOOLEAN DEFAULT FALSE,
+
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
+            ON UPDATE CURRENT_TIMESTAMP,
+
+        INDEX idx_conversation (conversation_id),
+        INDEX idx_sender (sender_id, sender_role)
+    )`;
         
         db.query(messagesSql, (err) => {
             if (err && err.code !== 'ER_NO_SUCH_TABLE') console.error("Error creating messages table:", err.message);

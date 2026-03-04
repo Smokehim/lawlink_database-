@@ -48,21 +48,21 @@ export default function District(app){
             res.status(200).json(results);
         });
     });
-    app.get('/districts/province/:province_id', (req, res) => {
-        const { province_id } = req.params;
+    // app.get('/districts/province/:province_id', (req, res) => {
+    //     const { province_id } = req.params;
     
-        const sql = `
-            SELECT district_id, district_name
-            FROM districts
-            WHERE province_id = ?
-            ORDER BY district_name ASC
-        `;
+    //     const sql = `
+    //         SELECT district_id, district_name
+    //         FROM districts
+    //         WHERE province_id = ?
+    //         ORDER BY district_name ASC
+    //     `;
     
-        db.query(sql, [province_id], (err, results) => {
-            if (err) return res.status(500).json({ message: "Database error" });
-            res.status(200).json(results);
-        });
-    });
+    //     db.query(sql, [province_id], (err, results) => {
+    //         if (err) return res.status(500).json({ message: "Database error" });
+    //         res.status(200).json(results);
+    //     });
+    // });
     app.get('/districts/:district_id', (req, res) => {
         const { district_id } = req.params;
     

@@ -138,6 +138,16 @@ export default function Lawyerss(app){
             return res.status(400).json({ message: "Verification failed" });
         }
     });
+    // testing post
+    app.post('/post', (req, res)=>{
+        const { full_name, email, phone_number, password, province, district, specialization, bar_number } = req.body;
+        const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`;
+        db.query(insertSql, [full_name, email, phone_number, password, province, district, specialization, bar_number], (errror, results)=>{
+            if(error) return res.status(404).json({error:"db error"})
+            res.send("here is user inserted ", result)
+            console.log("here is result for inserted", resulys)
+        })
+    })
     //lawstarts 
 
 app.get('/getlawyers', (req, res)=>{
@@ -189,106 +199,6 @@ app.post('/login_lawyer', async (req, res) => { // Changed to POST and a more de
     } catch (error) {
         res.status(500).json({ message: "Server error on lawyer login" });
         console.log("Server error on lawyer login", error);
-    }
-});
-// error on hash password
-app.put("/updatelawyers/:lawyer_id", async (req, res) => {
-  try {
-    const { lawyer_id } = req.params;
-    const {
-      full_name,
-      email,
-      phone_number,
-      specialization,
-      attorney_status,
-      bio,
-      password
-    } = req.body;
-
-    let hashedPassword = null;
-    if (password) {
-      hashedPassword = await bcrypt.hash(password, 10);
-    }
-
-    // Build dynamic SQL based on provided fields
-    let updates = [];
-    let params = [];
-    
-    if (full_name !== undefined && full_name !== null) {
-      updates.push('full_name = ?');
-      params.push(full_name);
-    }
-    if (email !== undefined && email !== null) {
-      updates.push('email = ?');
-      params.push(email);
-    }
-    if (phone_number !== undefined && phone_number !== null) {
-      updates.push('phone_number = ?');
-      params.push(phone_number);
-    }
-    if (specialization !== undefined && specialization !== null) {
-      updates.push('specialization = ?');
-      params.push(specialization);
-    }
-    if (attorney_status !== undefined && attorney_status !== null) {
-      updates.push('attorney_status = ?');
-      params.push(attorney_status);
-    }
-    if (bio !== undefined && bio !== null) {
-      updates.push('bio = ?');
-      params.push(bio);
-    }
-    if (hashedPassword !== null) {
-      updates.push('password = ?');
-      params.push(hashedPassword);
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ message: "No fields to update" });
-    }
-
-    params.push(lawyer_id);
-    const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
-
-    db.query(sql, params, (error, result) => {
-      if (error) {
-        console.error(error);
-        return res.status(500).json({ message: "Database error" });
-      }
-      res.status(200).json({
-        message: `Lawyer updated successfully ${result.affectedRows} row(s) affected`
-      });
-    });
-
-  } catch (error) {
-    console.error("Error updating lawyer:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.delete('/deletelawyers', async (req, res) => {
-    try {
-        const { lawyer_id, email, password } = req.body; // <-- change here
-
-        const selectSql = `SELECT * FROM lawyers WHERE lawyer_id = ? AND email = ?`;
-        db.query(selectSql, [lawyer_id, email], async (error, result) => {
-            if (error) return res.status(500).json({ message: "Database error" });
-            if (result.length === 0) return res.status(404).json({ message: "Lawyer not found" });
-
-            const lawyer = result[0];
-            const isMatch = await bcrypt.compare(password, lawyer.password);
-
-            if (!isMatch) return res.status(401).json({ message: "Incorrect password" });
-
-            const deleteSql = `DELETE FROM lawyers WHERE lawyer_id = ?`;
-            db.query(deleteSql, [lawyer_id], (error) => {
-                if (error) return res.status(500).json({ message: "Database error" });
-                res.status(200).json({ message: "Lawyer deleted successfully" });
-            });
-        });
-    } catch (error) {
-        console.log("Error deleting lawyer:", error);
-        res.status(500).send("Server error");
     }
 });
 
