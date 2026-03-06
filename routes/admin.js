@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 
+const JWT_SECRET = 'your-super-secret-key-for-jwt';
+
 const transport = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -77,17 +79,17 @@ export default function Admins(app){
 
     // Admin Verification Endpoint
     app.post('/verify_admin', (req, res) => {
-        const { admin_id, verificationCode } = req.body;
+        const { email, verificationCode } = req.body;
 
-        if (!admin_id || !verificationCode) {
-            return res.status(400).json({ message: "Admin ID and verification code are required" });
+        if (!email || !verificationCode) {
+            return res.status(400).json({ message: "Email and verification code are required" });
         }
 
         try {
             // Retrieve admin from database
-            const sql = "SELECT * FROM admins WHERE admin_id = ? AND verification_status = 'pending'";
+            const sql = "SELECT * FROM admins WHERE email = ? AND verification_status = 'pending'";
             
-            db.query(sql, [admin_id], (err, result) => {
+            db.query(sql, [email], (err, result) => {
                 if (err) return res.status(500).json({ message: "Database error", error: err.message });
                 
                 if (result.length === 0) {
@@ -95,6 +97,7 @@ export default function Admins(app){
                 }
 
                 const admin = result[0];
+                const admin_id = admin.admin_id;
                 
                 // Verify the code matches
                 if (admin.verification_code !== verificationCode) {
@@ -122,19 +125,75 @@ export default function Admins(app){
                     res.status(200).json({ 
                         message: "Admin verified and registered successfully", 
                         token, 
-                        user: { 
-                            adminId: admin_id, 
+                        user: {
+                            userId: admin_id,
                             email: admin.email, 
                             fullName: admin.full_name, 
+                            phone_number: admin.phone_number,
                             serialCode: serialCode, 
                             expiresAt: serialCodeExpiresAt 
-                        } 
+                        }
                     });
                 });
             });
         } catch (err) {
             console.log('Verification error:', err);
             return res.status(400).json({ message: "Verification failed" });
+        }
+    });
+
+    app.post('/login_admin', async (req, res) => {
+        try {
+            const { email, password } = req.body;
+            if (!email || !password) {
+                return res.status(400).json({ message: "Email and password are required" });
+            }
+    
+            const sql = "SELECT * FROM admins WHERE email = ?";
+            db.query(sql, [email], async (err, results) => {
+                if (err) {
+                    return res.status(500).json({ message: "Database error", error: err.message });
+                }
+    
+                if (results.length === 0) {
+                    return res.status(401).json({ message: "Invalid email or password" });
+                }
+    
+                const admin = results[0];
+    
+                if (admin.verification_status !== 'verified') {
+                    return res.status(403).json({
+                        message: "Account not verified. Please complete the verification step.",
+                        needsVerification: true,
+                        admin_id: admin.admin_id
+                    });
+                }
+    
+                const isMatch = await bcrypt.compare(password, admin.password);
+                if (!isMatch) {
+                    return res.status(401).json({ message: "Invalid email or password" });
+                }
+    
+                const token = jwt.sign(
+                    { adminId: admin.admin_id, email: admin.email },
+                    JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+    
+                res.status(200).json({ 
+                    message: "Login successful", 
+                    token: token, 
+                    user: { 
+                        userId: admin.admin_id,
+                        email: admin.email, 
+                        fullName: admin.full_name, 
+                        phone_number: admin.phone_number
+                    } 
+                });
+            });
+        } catch (error) {
+            console.log("Server error on admin login:", error);
+            res.status(500).json({ message: "Server error on admin login" });
         }
     });
 
@@ -147,7 +206,7 @@ export default function Admins(app){
 });
 app.put('/admins/:admin_id', async (req, res) => {
     const { admin_id } = req.params;
-    const { full_name, email, password } = req.body;
+    const { full_name, email, password, phone_number } = req.body;
 
     let hashedPassword = null;
     if (password) {
@@ -166,6 +225,10 @@ app.put('/admins/:admin_id', async (req, res) => {
     if (email !== undefined && email !== null) {
         updates.push('email = ?');
         params.push(email);
+    }
+    if (phone_number !== undefined && phone_number !== null) {
+        updates.push('phone_number = ?');
+        params.push(phone_number);
     }
     if (hashedPassword !== null) {
         updates.push('password = ?');
@@ -194,141 +257,44 @@ app.delete('/admins/:admin_id', (req, res) => {
     });
 });
 
-    // --- Lawyer Management by Admin ---
+app.put('/admins/password', async (req, res) => {
+    try {
+        const { current_password, new_password, admin_id } = req.body;
 
-    // Get all lawyers for admin view
-    app.get('/admins/lawyers', (req, res) => {
-        const sql = "SELECT * FROM lawyers ORDER BY created_at DESC";
-        db.query(sql, (err, results) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err });
-            res.json(results);
-        });
-    });
-
-    // Update a lawyer's profile (by admin)
-    app.put('/admins/lawyers/:lawyer_id', (req, res) => {
-        const { lawyer_id } = req.params;
-        const {
-            full_name, email, phone_number, province, district,
-            specialization, attorney_status, bio, bar_number, verification_status
-        } = req.body;
-
-        // Build dynamic SQL based on provided fields
-        let updates = [];
-        let params = [];
-        
-        if (full_name !== undefined && full_name !== null) {
-            updates.push('full_name = ?');
-            params.push(full_name);
-        }
-        if (email !== undefined && email !== null) {
-            updates.push('email = ?');
-            params.push(email);
-        }
-        if (phone_number !== undefined && phone_number !== null) {
-            updates.push('phone_number = ?');
-            params.push(phone_number);
-        }
-        if (province !== undefined && province !== null) {
-            updates.push('province = ?');
-            params.push(province);
-        }
-        if (district !== undefined && district !== null) {
-            updates.push('district = ?');
-            params.push(district);
-        }
-        if (specialization !== undefined && specialization !== null) {
-            updates.push('specialization = ?');
-            params.push(specialization);
-        }
-        if (attorney_status !== undefined && attorney_status !== null) {
-            updates.push('attorney_status = ?');
-            params.push(attorney_status);
-        }
-        if (bio !== undefined && bio !== null) {
-            updates.push('bio = ?');
-            params.push(bio);
-        }
-        if (bar_number !== undefined && bar_number !== null) {
-            updates.push('bar_number = ?');
-            params.push(bar_number);
-        }
-        if (verification_status !== undefined && verification_status !== null) {
-            updates.push('verification_status = ?');
-            params.push(verification_status);
+        if (!current_password || !new_password || !admin_id) {
+            return res.status(400).json({ message: "Current password, new password, and admin_id are required." });
         }
 
-        if (updates.length === 0) {
-            return res.status(400).json({ message: "No fields to update" });
-        }
-
-        params.push(lawyer_id);
-        const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
-
-        db.query(sql, params, (err, result) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err });
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ message: "Lawyer not found" });
+        const selectSql = `SELECT password FROM admins WHERE admin_id = ?`;
+        db.query(selectSql, [admin_id], async (error, result) => {
+            if (error) {
+                return res.status(500).json({ message: "Database error", error: error.message });
             }
-            res.json({ message: "Lawyer profile updated successfully by admin" });
-        });
-    });
-
-    // Update lawyer verification status (by admin)
-    app.put('/admins/lawyers/:lawyer_id/verification', (req, res) => {
-        const { lawyer_id } = req.params;
-        const { status } = req.body;
-
-        if (!status || !['verified', 'rejected', 'pending'].includes(status)) {
-            return res.status(400).json({ message: "Invalid status. Must be 'verified', 'rejected', or 'pending'." });
-        }
-
-        const sql = "UPDATE lawyers SET verification_status = ? WHERE lawyer_id = ?";
-        db.query(sql, [status, lawyer_id], (err, result) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err });
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ message: "Lawyer not found" });
+            if (result.length === 0) {
+                return res.status(404).json({ message: "Admin not found" });
             }
-            res.json({ message: `Lawyer verification status updated to ${status}` });
-        });
-    });
 
-    // Delete a lawyer (by admin)
-    app.delete('/admins/lawyers/:lawyer_id', (req, res) => {
-        const { lawyer_id } = req.params;
-        const sql = "DELETE FROM lawyers WHERE lawyer_id = ?";
-        db.query(sql, [lawyer_id], (err, result) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err });
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ message: "Lawyer not found" });
+            const admin = result[0];
+            const isMatch = await bcrypt.compare(current_password, admin.password);
+
+            if (!isMatch) {
+                return res.status(401).json({ message: "Incorrect current password" });
             }
-            res.json({ message: "Lawyer deleted successfully" });
-        });
-    });
 
-    // --- User (Client) Management by Admin ---
+            const salt = await bcrypt.genSalt(10);
+            const hashedNewPassword = await bcrypt.hash(new_password, salt);
 
-    // Get all users for admin view (excluding password)
-    app.get('/admins/users', (req, res) => {
-        const sql = "SELECT user_id, full_name, email, phone_number, gender, created_at FROM users ORDER BY created_at DESC";
-        db.query(sql, (err, results) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err });
-            res.json(results);
+            const updateSql = `UPDATE admins SET password = ? WHERE admin_id = ?`;
+            db.query(updateSql, [hashedNewPassword, admin_id], (updateError) => {
+                if (updateError) return res.status(500).json({ message: "Database error during password update", error: updateError.message });
+                res.status(200).json({ message: "Password updated successfully" });
+            });
         });
-    });
-
-    // Delete a user (by admin)
-    app.delete('/admins/users/:user_id', (req, res) => {
-        const { user_id } = req.params;
-        const sql = "DELETE FROM users WHERE user_id = ?";
-        db.query(sql, [user_id], (err, result) => {
-            if (err) return res.status(500).json({ message: "Database error", error: err });
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ message: "User not found" });
-            }
-            res.json({ message: "User deleted successfully" });
-        });
-    });
+    } catch (error) {
+        console.error("Server error on changing admin password:", error);
+        res.status(500).json({ message: "Server error on changing admin password" });
+    }
+});
 
     app.post('/forgot_password_admin', (req, res) => {
         const { email } = req.body;

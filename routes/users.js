@@ -185,7 +185,7 @@ export default function Users(app){
             
     
             const sql = "SELECT * FROM users WHERE email = ?";
-            db.query(sql, [email, password], async (err, results) => {
+            db.query(sql, [email], async (err, results) => {
                 console.log("Database query executed");
                 if (err) {
                     return res.status(500).json({ message: "Database error" });
@@ -227,6 +227,7 @@ export default function Users(app){
             res.status(500).json({ message: "Server error on login" });
         }
     });
+
     //checing post 
     app.post('/userspost', async (req, res)=>{
         const { full_name, email, phone_number, password, gender } = req.body;
@@ -333,20 +334,26 @@ export default function Users(app){
         }
     });
 
-    // Change a user's password
-    app.put('/users/:user_id/password', async (req, res) => {
-        try {
-            const { user_id } = req.params;
-            const { current_password, new_password } = req.body;
+   
 
-            if (!current_password || !new_password) {
-                return res.status(400).json({ message: "Current and new passwords are required." });
+    // Change a user's password
+    app.put('/userspassword', async (req, res) => {
+        try {
+            const { current_password, new_password, user_id } = req.body;
+
+            if (!current_password || !new_password || !user_id) {
+                return res.status(400).json({ message: "Current password, new password, and user_id are required." });
             }
 
             const selectSql = `SELECT password FROM users WHERE user_id = ?`;
             db.query(selectSql, [user_id], async (error, result) => {
-                if (error) return res.status(500).json({ message: "Database error", error: error.message });
-                if (result.length === 0) return res.status(404).json({ message: "User not found" });
+                if (error) {
+                    return res.status(500).json({ message: "Database error", error: error.message });
+                }
+                if (result.length === 0) {
+                    console.log("user not found", error, result);
+                    return res.status(404).json({ message: "User not found" });
+                }
 
                 const user = result[0];
                 const isMatch = await bcrypt.compare(current_password, user.password);
@@ -408,5 +415,55 @@ export default function Users(app){
         }
     });
 
+    // Admin-specific route to update a user.
+    app.put('/admin/users/:user_id', async (req, res) => {
+        const { user_id } = req.params;
+        const { full_name, email, phone_number, password } = req.body;
+
+        try {
+            let hashedPassword = null;
+            if (password) {
+                const salt = await bcrypt.genSalt(10);
+                hashedPassword = await bcrypt.hash(password, salt);
+            }
+
+            let updates = [];
+            let params = [];
+            
+            if (full_name !== undefined) { updates.push('full_name = ?'); params.push(full_name); }
+            if (email !== undefined) { updates.push('email = ?'); params.push(email); }
+            if (phone_number !== undefined) { updates.push('phone_number = ?'); params.push(phone_number); }
+            if (hashedPassword) { updates.push('password = ?'); params.push(hashedPassword); }
+
+            if (updates.length === 0) {
+                return res.status(400).json({ message: "No fields to update" });
+            }
+
+            params.push(user_id);
+            const sql = `UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`;
+
+            db.query(sql, params, (err, result) => {
+                if (err) return res.status(500).json({ message: "Database error", error: err.message });
+                if (result.affectedRows === 0) return res.status(404).json({ message: "User not found" });
+                res.json({ message: `User updated successfully by admin.` });
+            });
+        } catch (error) {
+            console.error("Server error on admin updating user:", error);
+            res.status(500).json({ message: "Server error on admin updating user" });
+        }
+    });
+
+    // Admin-specific route to delete a user.
+    // In a real application, this should be protected by an admin authentication middleware.
+    app.delete('/admin/users/:user_id', (req, res) => {
+        const { user_id } = req.params;
+
+        const deleteSql = `DELETE FROM users WHERE user_id = ?`;
+        db.query(deleteSql, [user_id], (deleteError, result) => {
+            if (deleteError) return res.status(500).json({ message: "Database error during deletion", error: deleteError.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "User not found" });
+            res.status(200).json({ message: "User account deleted successfully by admin" });
+        });
+    });
  
 }

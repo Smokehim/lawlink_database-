@@ -40,7 +40,7 @@ export default function Lawyerss(app){
                 console.log(`Verification code for new lawyer ${email} is: ${verificationCode}`);
                 
                 // Store lawyer data in database with pending status
-                const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`;
+                const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unverified', ?)`;
                 
                 db.query(insertSql, [full_name, email, phone_number, hashedPassword, province, district, specialization, bar_number, verificationCode], (insertErr, insertResult) => {
                     if (insertErr) return res.status(500).json({ message: "Database error", error: insertErr.message });
@@ -78,17 +78,17 @@ export default function Lawyerss(app){
 
     // Lawyer Verification Endpoint
     app.post('/verify_lawyer', (req, res) => {
-        const { lawyer_id, verificationCode } = req.body;
+        const { email, verificationCode } = req.body;
 
-        if (!lawyer_id || !verificationCode) {
-            return res.status(400).json({ message: "Lawyer ID and verification code are required" });
+        if (!email || !verificationCode) {
+            return res.status(400).json({ message: "Email and verification code are required" });
         }
 
         try {
             // Retrieve lawyer from database
-            const sql = "SELECT * FROM lawyers WHERE lawyer_id = ? AND verification_status = 'pending'";
+            const sql = "SELECT * FROM lawyers WHERE email = ? AND (verification_status = 'pending' OR verification_status = 'unverified')";
             
-            db.query(sql, [lawyer_id], (err, result) => {
+            db.query(sql, [email], (err, result) => {
                 if (err) return res.status(500).json({ message: "Database error", error: err.message });
                 
                 if (result.length === 0) {
@@ -96,6 +96,7 @@ export default function Lawyerss(app){
                 }
 
                 const lawyer = result[0];
+                const lawyer_id = lawyer.lawyer_id;
                 
                 // Verify the code matches
                 if (lawyer.verification_code !== verificationCode) {
@@ -108,7 +109,7 @@ export default function Lawyerss(app){
                 const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
 
                 // Update lawyer status to verified and add serial code
-                const updateSql = `UPDATE lawyers SET verification_status = 'verified', serial_code = ?, serial_code_expires_at = ?, verification_code = NULL WHERE lawyer_id = ?`;
+                const updateSql = `UPDATE lawyers SET verification_status = 'pending', serial_code = ?, serial_code_expires_at = ?, verification_code = NULL WHERE lawyer_id = ?`;
                 
                 db.query(updateSql, [serialCode, serialCodeExpiresAt, lawyer_id], (updateErr) => {
                     if (updateErr) return res.status(500).json({ message: "Database error", error: updateErr.message });
@@ -122,7 +123,7 @@ export default function Lawyerss(app){
 
                     res.status(200).json({ 
                         message: "Lawyer verified and registered successfully", 
-                        token, 
+                        token,
                         user: { 
                             lawyerId: lawyer_id, 
                             email: lawyer.email, 
@@ -141,18 +142,18 @@ export default function Lawyerss(app){
     // testing post
     app.post('/post', (req, res)=>{
         const { full_name, email, phone_number, password, province, district, specialization, bar_number } = req.body;
-        const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`;
-        db.query(insertSql, [full_name, email, phone_number, password, province, district, specialization, bar_number], (errror, results)=>{
-            if(error) return res.status(404).json({error:"db error"})
-            res.send("here is user inserted ", result)
-            console.log("here is result for inserted", resulys)
+        const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unverified', ?)`;
+        db.query(insertSql, [full_name, email, phone_number, password, province, district, specialization, bar_number, null], (error, results)=>{
+            if(error) return res.status(500).json({message:"db error", error: error.message});
+            console.log("here is result for inserted", results);
+            res.json({message: "User inserted successfully", results});
         })
     })
     //lawstarts 
 
 app.get('/getlawyers', (req, res)=>{
     try {
-        const sql = "SELECT * FROM lawyers";
+        const sql = "SELECT * FROM lawyers ";
         db.query(sql, (error, result) => {
             if(error) return res.status(500).json({ message: "Database error", error: error.message });
             res.status(200).json(result);
@@ -162,16 +163,15 @@ app.get('/getlawyers', (req, res)=>{
         res.status(500).json({ message: "Server error on retrieving lawyers" });
     }
 })
-app.post('/login_lawyer', async (req, res) => { // Changed to POST and a more descriptive name
+
+app.post('/login_lawyer', async (req, res) => {
     try {
         const { email, password } = req.body;
-        console.log("Login attempt for email:", email, password);
-        
+        console.log("Lawyer login attempt for email:", email);
 
         const sql = "SELECT * FROM lawyers WHERE email = ?";
-        console.log("Executing SQL:", sql, "with email:", email);
         db.query(sql, [email], async (err, results) => {
-            console.log("Database query executed");
+            console.log("Lawyer login results:", results);
             if (err) {
                 return res.status(500).json({ message: "Database error" });
             }
@@ -188,17 +188,72 @@ app.post('/login_lawyer', async (req, res) => { // Changed to POST and a more de
             }
 
             const token = jwt.sign(
-                { lawyerId: lawyer.lawyer_id, email: lawyer.email },
+                { userId: lawyer.lawyer_id, email: lawyer.email, role: 'lawyer' },
                 JWT_SECRET,
                 { expiresIn: '24h' }
             );
 
-            res.status(200).json({ message: "Login successful", token, lawyer: { lawyerId: lawyer.lawyer_id, email: lawyer.email, fullName: lawyer.full_name } });
+            res.status(200).json({ 
+                message: "Login successful", 
+                token: token, 
+                user: { 
+                    userId: lawyer.lawyer_id, 
+                    email: lawyer.email, 
+                    fullName: lawyer.full_name,
+                    phone: lawyer.phone_number,
+                    province: lawyer.province,
+                    district: lawyer.district,
+                    specialization: lawyer.specialization,
+                    role: 'lawyer'
+                } 
+            });
         });
 
     } catch (error) {
+        console.log("Server error on lawyer login:", error);
         res.status(500).json({ message: "Server error on lawyer login" });
-        console.log("Server error on lawyer login", error);
+    }
+});
+
+app.put('/updateLawyer/:lawyer_id', async (req, res) => {
+    try {
+        const { lawyer_id } = req.params;
+        const { full_name, email, phone_number, gender, province, district, specialization, bio, password } = req.body;
+
+        let updates = [];
+        let params = [];
+
+        if (full_name !== undefined) { updates.push('full_name = ?'); params.push(full_name); }
+        if (email !== undefined) { updates.push('email = ?'); params.push(email); }
+        if (phone_number !== undefined) { updates.push('phone_number = ?'); params.push(phone_number); }
+        if (gender !== undefined) { updates.push('gender = ?'); params.push(gender); }
+        if (province !== undefined) { updates.push('province = ?'); params.push(province); }
+        if (district !== undefined) { updates.push('district = ?'); params.push(district); }
+        if (specialization !== undefined) { updates.push('specialization = ?'); params.push(specialization); }
+        if (bio !== undefined) { updates.push('bio = ?'); params.push(bio); }
+        
+        if (password) {
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(password, salt);
+            updates.push('password = ?');
+            params.push(hashedPassword);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ message: "No fields to update" });
+        }
+
+        params.push(lawyer_id);
+        const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
+
+        db.query(sql, params, (error, result) => {
+            if (error) return res.status(500).json({ message: "Database error", error: error.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            res.status(200).json({ message: "Lawyer profile updated successfully" });
+        });
+    } catch (error) {
+        console.error("Server error on updating lawyer profile:", error);
+        res.status(500).json({ message: "Server error on updating lawyer profile" });
     }
 });
 
@@ -255,5 +310,150 @@ app.post('/reset_password_lawyer', async (req, res) => {
         });
     });
 });
+
+app.put('/lawyers/password', async (req, res) => {
+    try {
+        const { current_password, new_password, user_id } = req.body;
+
+        if (!current_password || !new_password || !user_id) {
+            return res.status(400).json({ message: "Current password, new password, and user_id are required." });
+        }
+
+        const selectSql = `SELECT password FROM lawyers WHERE lawyer_id = ?`;
+        db.query(selectSql, [user_id], async (error, result) => {
+            if (error) {
+                return res.status(500).json({ message: "Database error", error: error.message });
+            }
+            if (result.length === 0) {
+                return res.status(404).json({ message: "Lawyer not found" });
+            }
+
+            const lawyer = result[0];
+            const isMatch = await bcrypt.compare(current_password, lawyer.password);
+
+            if (!isMatch) {
+                return res.status(401).json({ message: "Incorrect current password" });
+            }
+
+            const salt = await bcrypt.genSalt(10);
+            const hashedNewPassword = await bcrypt.hash(new_password, salt);
+
+            const updateSql = `UPDATE lawyers SET password = ? WHERE lawyer_id = ?`;
+            db.query(updateSql, [hashedNewPassword, user_id], (updateError) => {
+                if (updateError) return res.status(500).json({ message: "Database error during password update", error: updateError.message });
+                res.status(200).json({ message: "Password updated successfully" });
+            });
+        });
+    } catch (error) {
+        console.error("Server error on changing lawyer password:", error);
+        res.status(500).json({ message: "Server error on changing lawyer password" });
+    }
+});
+
+app.delete('/lawyers/delete', async (req, res) => {
+    const { email, password, user_id } = req.body;
+
+    if (!email || !password || !user_id) {
+         return res.status(400).json({ message: "Email, password and user_id are required" });
+    }
+
+    try {
+        const selectSql = `SELECT * FROM lawyers WHERE lawyer_id = ? AND email = ?`;
+        db.query(selectSql, [user_id, email], async (error, result) => {
+            if (error) return res.status(500).json({ message: "Database error", error: error.message });
+            if (result.length === 0) return res.status(404).json({ message: "Lawyer not found or email does not match" });
+
+            const lawyer = result[0];
+            const isMatch = await bcrypt.compare(password, lawyer.password);
+
+            if (!isMatch) return res.status(401).json({ message: "Incorrect password" });
+
+            const deleteSql = `DELETE FROM lawyers WHERE lawyer_id = ?`;
+            db.query(deleteSql, [user_id], (deleteError) => {
+                if (deleteError) return res.status(500).json({ message: "Database error during deletion", error: deleteError.message });
+                res.status(200).json({ message: "Lawyer account deleted successfully" });
+            });
+        });
+    } catch (error) {
+        console.error("Server error on deleting lawyer:", error);
+        res.status(500).json({ message: "Server error on deleting lawyer" });
+    }
+});
+
+    // Admin: Update lawyer verification status
+    app.put('/admin/lawyers/:lawyer_id/status', (req, res) => {
+        const { lawyer_id } = req.params;
+        const { status } = req.body; // expecting 'verified' or 'rejected'
+
+        if (!status || !['verified', 'rejected', 'pending', 'unverified'].includes(status)) {
+            return res.status(400).json({ message: "A valid status is required." });
+        }
+
+        const updateSql = `UPDATE lawyers SET verification_status = ? WHERE lawyer_id = ?`;
+        db.query(updateSql, [status, lawyer_id], (err, result) => {
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            
+            // Send email if verified
+            if (status === 'verified') {
+                const getLawyerSql = "SELECT email, full_name FROM lawyers WHERE lawyer_id = ?";
+                db.query(getLawyerSql, [lawyer_id], (err, results) => {
+                    if (!err && results.length > 0) {
+                        const { email, full_name } = results[0];
+                        const mailOptions = {
+                            from: 'mwambajason2@gmail.com',
+                            to: email,
+                            subject: 'LawLink Account Verified',
+                            text: `Dear ${full_name},\n\nYour account has been verified. You can now access the lawyer dashboard and will be visible to clients.\n\nRegards,\nLawLink Admin`
+                        };
+                        transport.sendMail(mailOptions, (error, info) => {
+                            if (error) console.log("Error sending verification email:", error);
+                        });
+                    }
+                });
+            }
+
+            res.status(200).json({ message: `Lawyer status updated to ${status}` });
+        });
+    });
+
+    // Admin: Update lawyer details
+    app.put('/admin/lawyers/:lawyer_id', (req, res) => {
+        const { lawyer_id } = req.params;
+        const { full_name, email, phone_number, specialization, province, district } = req.body;
+        
+        let updates = [];
+        let params = [];
+
+        if (full_name) { updates.push('full_name = ?'); params.push(full_name); }
+        if (email) { updates.push('email = ?'); params.push(email); }
+        if (phone_number) { updates.push('phone_number = ?'); params.push(phone_number); }
+        if (specialization) { updates.push('specialization = ?'); params.push(specialization); }
+        if (province) { updates.push('province = ?'); params.push(province); }
+        if (district) { updates.push('district = ?'); params.push(district); }
+
+        if (updates.length === 0) return res.status(400).json({ message: "No fields to update" });
+
+        params.push(lawyer_id);
+        const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
+        
+        db.query(sql, params, (err, result) => {
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            res.status(200).json({ message: "Lawyer updated successfully" });
+        });
+    });
+
+    // Admin: Delete a lawyer
+    app.delete('/admin/lawyers/:lawyer_id', (req, res) => {
+        const { lawyer_id } = req.params;
+
+        const deleteSql = `DELETE FROM lawyers WHERE lawyer_id = ?`;
+        db.query(deleteSql, [lawyer_id], (err, result) => {
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            res.status(200).json({ message: "Lawyer deleted successfully" });
+        });
+    });
 
 }
