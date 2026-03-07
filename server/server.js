@@ -10,6 +10,9 @@ import Lawslocation from '../routes/lawslocation.js';
 import Province from '../routes/province.js';
 import Users from '../routes/users.js';
 import Messages from '../routes/messages.js';
+import Conversations from '../routes/conversations.js';
+import Profile from '../routes/profile.js';
+import Support from '../routes/support.js';
 
 
 const port = 3002;
@@ -22,6 +25,9 @@ Lawslocation(app);
 Province(app);
 Users(app);
 Messages(app);
+Conversations(app);
+Profile(app);
+Support(app);
 
 app.listen(port, ()=>{
     console.log(`server is running on port ${port}`);
