@@ -84,8 +84,9 @@ export default function Support(app) {
     });
 
     // Get all support conversations for an admin
-    app.get('/support/conversations', (req, res) => {
+    app.get('/support/conversations/:admin_id', (req, res) => {
         const { admin_id } = req.params;
+        console.log(`Fetching support conversations for admin_id: ${admin_id}`);
 
         const sql = `
             SELECT 
@@ -113,6 +114,7 @@ export default function Support(app) {
                 console.error('Error fetching admin support conversations:', err);
                 return res.status(500).json({ message: 'Database error', error: err.message });
             }
+            console.log(`Successfully fetched ${results.length} support conversations for admin_id: ${admin_id}`);
             res.status(200).json(results);
         });
     });

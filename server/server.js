@@ -13,6 +13,8 @@ import Messages from '../routes/messages.js';
 import Conversations from '../routes/conversations.js';
 import Profile from '../routes/profile.js';
 import Support from '../routes/support.js';
+import Availability from '../routes/availability.js';
+import ClientRequests from '../routes/clients.js';
 
 
 const port = 3002;
@@ -28,6 +30,8 @@ Messages(app);
 Conversations(app);
 Profile(app);
 Support(app);
+Availability(app);
+ClientRequests(app);
 
 app.listen(port, ()=>{
     console.log(`server is running on port ${port}`);

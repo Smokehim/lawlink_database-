@@ -187,7 +187,66 @@ db.connect((err) => {
         
         db.query(messagesSql, (err) => {
             if (err && err.code !== 'ER_NO_SUCH_TABLE') console.error("Error creating messages table:", err.message);
-            else if (!err) console.log("Messages Table Created");
+            else if (!err) {
+                console.log("Messages Table Created");
+                createLawyerAvailabilityTable();
+            }
+        });
+    }
+
+    function createLawyerAvailabilityTable() {
+        const sql = `CREATE TABLE IF NOT EXISTS lawyer_availability (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            lawyer_id INT NOT NULL,
+            unavailable_date DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_lawyer_date (lawyer_id, unavailable_date),
+            FOREIGN KEY (lawyer_id) REFERENCES lawyers(lawyer_id) ON DELETE CASCADE
+        )`;
+        db.query(sql, (err) => {
+            if (err) console.error("Error creating lawyer_availability table:", err);
+            else {
+                console.log("Lawyer_availability Table Created");
+                createWorkingHoursTable();
+            }
+        });
+    }
+
+    function createWorkingHoursTable() {
+        const sql = `CREATE TABLE IF NOT EXISTS working_hours (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            lawyer_id INT NOT NULL,
+            day_of_week ENUM('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday') NOT NULL,
+            start_time TIME DEFAULT '09:00:00',
+            end_time TIME DEFAULT '17:00:00',
+            is_closed BOOLEAN DEFAULT FALSE,
+            UNIQUE KEY unique_lawyer_day (lawyer_id, day_of_week),
+            FOREIGN KEY (lawyer_id) REFERENCES lawyers(lawyer_id) ON DELETE CASCADE
+        )`;
+        db.query(sql, (err) => {
+            if (err) console.error("Error creating working_hours table:", err);
+            else {
+                console.log("Working_hours Table Created");
+                createClientRequestsTable();
+            }
+        });
+    }
+
+    function createClientRequestsTable() {
+        const sql = `CREATE TABLE IF NOT EXISTS client_requests (
+            request_id INT AUTO_INCREMENT PRIMARY KEY,
+            client_id INT NOT NULL,
+            lawyer_id INT NOT NULL,
+            request_details TEXT NOT NULL,
+            status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (lawyer_id) REFERENCES lawyers(lawyer_id) ON DELETE CASCADE
+        )`;
+        db.query(sql, (err) => {
+            if (err) console.error("Error creating client_requests table:", err);
+            else console.log("Client_requests Table Created");
         });
     }
 
