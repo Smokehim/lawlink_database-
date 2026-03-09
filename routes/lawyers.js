@@ -3,6 +3,34 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+
+// Ensure upload directory exists
+const uploadDir = path.join(process.cwd(), 'uploads/lawyer_docs');
+const profileDir = path.join(process.cwd(), 'uploads/profile_pictures');
+
+[uploadDir, profileDir].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        if (file.fieldname === 'profile_picture') cb(null, profileDir);
+        else cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const prefix = file.fieldname === 'profile_picture' ? 'lawyer-pic' : 'lawyer-license';
+        cb(null, `${prefix}-${uniqueSuffix}${path.extname(file.originalname)}`);
+    }
+});
+
+const upload = multer({ storage });
+
 
 const JWT_SECRET = 'your-super-secret-key-for-jwt';
 
@@ -17,9 +45,14 @@ const transport = nodemailer.createTransport({
 export default function Lawyerss(app) {
 
     // New Lawyer Registration Endpoint
-    app.post('/registration_Lawyer', async (req, res) => {
+    app.post('/registration_Lawyer', upload.fields([
+        { name: 'profile_picture', maxCount: 1 },
+        { name: 'license_file', maxCount: 1 }
+    ]), async (req, res) => {
         try {
             const { full_name, email, phone_number, password, province, district, specialization, bar_number } = req.body;
+            const profilePicture = req.files['profile_picture'] ? `/uploads/profile_pictures/${req.files['profile_picture'][0].filename}` : null;
+            const licenseFile = req.files['license_file'] ? `/uploads/lawyer_docs/${req.files['license_file'][0].filename}` : null;
             console.log("Received lawyer signup data:", full_name, email, phone_number, password);
 
             if (!password) {
@@ -40,9 +73,9 @@ export default function Lawyerss(app) {
                 console.log(`Verification code for new lawyer ${email} is: ${verificationCode}`);
 
                 // Store lawyer data in database with pending status
-                const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unverified', ?)`;
-
-                db.query(insertSql, [full_name, email, phone_number, hashedPassword, province, district, specialization, bar_number, verificationCode], (insertErr, insertResult) => {
+                const insertSql = `INSERT INTO lawyers (full_name, email, phone_number, password, province, district, specialization, bar_number, profile_picture, license_file, verification_status, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unverified', ?)`;
+                
+                db.query(insertSql, [full_name, email, phone_number, hashedPassword, province, district, specialization, bar_number, profilePicture, licenseFile, verificationCode], (insertErr, insertResult) => {
                     if (insertErr) return res.status(500).json({ message: "Database error", error: insertErr.message });
 
                     const lawyerId = insertResult.insertId;
@@ -333,12 +366,12 @@ export default function Lawyerss(app) {
         try {
             const { current_password, new_password, email } = req.body;
 
-            if (!current_password || !new_password || !user_id) {
-                return res.status(400).json({ message: "Current password, new password, and user_id are required." });
+            if (!current_password || !new_password || !email) {
+                return res.status(400).json({ message: "Current password, new password, and email are required." });
             }
 
-            const selectSql = `SELECT password FROM lawyers WHERE lawyer_id = ?`;
-            db.query(selectSql, [user_id], async (error, result) => {
+            const selectSql = `SELECT lawyer_id, password FROM lawyers WHERE email = ?`;
+            db.query(selectSql, [email], async (error, result) => {
                 if (error) {
                     return res.status(500).json({ message: "Database error", error: error.message });
                 }
@@ -356,8 +389,8 @@ export default function Lawyerss(app) {
                 const salt = await bcrypt.genSalt(10);
                 const hashedNewPassword = await bcrypt.hash(new_password, salt);
 
-                const updateSql = `UPDATE lawyers SET password = ? WHERE lawyer_id = ?`;
-                db.query(updateSql, [hashedNewPassword, user_id], (updateError) => {
+                const updateSql = `UPDATE lawyers SET password = ? WHERE email = ?`;
+                db.query(updateSql, [hashedNewPassword, email], (updateError) => {
                     if (updateError) return res.status(500).json({ message: "Database error during password update", error: updateError.message });
                     res.status(200).json({ message: "Password updated successfully" });
                 });
@@ -396,5 +429,65 @@ export default function Lawyerss(app) {
             console.error("Server error on deleting lawyer:", error);
             res.status(500).json({ message: "Server error on deleting lawyer" });
         }
+    });
+
+    // ── Admin Lawyer Management Routes ──
+
+    // Admin: Update lawyer verification status (verify/reject)
+    app.put('/admin/lawyers/:lawyer_id/status', (req, res) => {
+        const { lawyer_id } = req.params;
+        const { status } = req.body;
+
+        if (!['verified', 'rejected'].includes(status)) {
+            return res.status(400).json({ message: "Invalid status. Must be 'verified' or 'rejected'." });
+        }
+
+        const sql = `UPDATE lawyers SET verification_status = ? WHERE lawyer_id = ?`;
+        db.query(sql, [status, lawyer_id], (err, result) => {
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            res.status(200).json({ message: `Lawyer status updated to ${status}` });
+        });
+    });
+
+    // Admin: Update lawyer details
+    app.put('/admin/lawyers/:lawyer_id', (req, res) => {
+        const { lawyer_id } = req.params;
+        const { full_name, email, phone_number, specialization, province, district } = req.body;
+
+        let updates = [];
+        let params = [];
+
+        if (full_name !== undefined) { updates.push('full_name = ?'); params.push(full_name); }
+        if (email !== undefined) { updates.push('email = ?'); params.push(email); }
+        if (phone_number !== undefined) { updates.push('phone_number = ?'); params.push(phone_number); }
+        if (specialization !== undefined) { updates.push('specialization = ?'); params.push(specialization); }
+        if (province !== undefined) { updates.push('province = ?'); params.push(province); }
+        if (district !== undefined) { updates.push('district = ?'); params.push(district); }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ message: "No fields to update" });
+        }
+
+        params.push(lawyer_id);
+        const sql = `UPDATE lawyers SET ${updates.join(', ')} WHERE lawyer_id = ?`;
+
+        db.query(sql, params, (err, result) => {
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            res.status(200).json({ message: "Lawyer updated successfully by admin" });
+        });
+    });
+
+    // Admin: Delete a lawyer
+    app.delete('/admin/lawyers/:lawyer_id', (req, res) => {
+        const { lawyer_id } = req.params;
+
+        const sql = `DELETE FROM lawyers WHERE lawyer_id = ?`;
+        db.query(sql, [lawyer_id], (err, result) => {
+            if (err) return res.status(500).json({ message: "Database error", error: err.message });
+            if (result.affectedRows === 0) return res.status(404).json({ message: "Lawyer not found" });
+            res.status(200).json({ message: "Lawyer deleted successfully by admin" });
+        });
     });
 }

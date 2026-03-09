@@ -3,6 +3,26 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+
+// Ensure upload directory exists
+const uploadDir = path.join(process.cwd(), 'uploads/profile_pictures');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, `user-reg-${uniqueSuffix}${path.extname(file.originalname)}`);
+    }
+});
+
+const upload = multer({ storage });
+
 
 const JWT_SECRET = 'your-super-secret-key-for-jwt';
 
@@ -31,9 +51,10 @@ const transport = nodemailer.createTransport({
 });
 export default function Users(app){
     
-    app.post('/registration_User', async (req, res) => {
+    app.post('/registration_User', upload.single('profile_picture'), async (req, res) => {
         try {
             const { full_name, email, phone_number, password, gender } = req.body;
+            const profilePicture = req.file ? `/uploads/profile_pictures/${req.file.filename}` : null;
             console.log("Received signup data:", req.body);
     
             if (!password) {
@@ -69,6 +90,7 @@ export default function Users(app){
                     phone_number,
                     password: hashedPassword,
                     gender,
+                    profilePicture,
                     verificationCode,
                     createdAt: Date.now()
                 });
@@ -128,9 +150,9 @@ export default function Users(app){
             const serialCodeExpiresAt = new Date(Date.now() + 20 * 60 * 1000);
 
             // Now insert the verified user into the database
-            const insertSql = `INSERT INTO users (full_name, email, phone_number, password, gender, verification_status, serial_code, serial_code_expires_at) VALUES (?, ?, ?, ?, ?, 'verified', ?, ?)`;
+            const insertSql = `INSERT INTO users (full_name, email, phone_number, password, gender, profile_picture, verification_status, serial_code, serial_code_expires_at) VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, ?)`;
             
-            db.query(insertSql, [pendingUser.full_name, pendingUser.email, pendingUser.phone_number, pendingUser.password, pendingUser.gender, serialCode, serialCodeExpiresAt], (insertErr, insertResult) => {
+            db.query(insertSql, [pendingUser.full_name, pendingUser.email, pendingUser.phone_number, pendingUser.password, pendingUser.gender, pendingUser.profilePicture, serialCode, serialCodeExpiresAt], (insertErr, insertResult) => {
                 if (insertErr) {
                     console.error("Database error:", insertErr);
                     return res.status(500).json({ message: "Database error", error: insertErr.message });
